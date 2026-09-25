@@ -119,6 +119,7 @@ Message: Medical assistance required in Sector 4
 | `/msg <node_id> <message>` | Send direct offline text message to specific node |
 | `/broadcast <message>` | Broadcast message to all nearby nodes |
 | `/sos [message]` | Broadcast high-priority emergency alert with GPS location |
+| `/location` | View or set node GPS/manual location coordinates (`/location set <lat> <lon>`) |
 | `/history` | View stored message history from SQLite database |
 | `/status` | View node configuration, local IP address, and ports |
 | `/connect <ip> [port]` | Manually connect to peer IP address |
