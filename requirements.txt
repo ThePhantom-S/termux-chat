@@ -1,0 +1,2 @@
+# EmergencyMesh requires Python 3.8+ standard library only.
+# No external pip packages needed!
