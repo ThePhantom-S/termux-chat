@@ -26,10 +26,11 @@ Type {BOLD}/help{RESET} for commands list.
 HELP_TEXT = f"""
 {BOLD}Available Commands:{RESET}
   {CYAN}/help{RESET}                     - Show this help manual
-  {CYAN}/nodes{RESET}                    - List active nearby mesh nodes
+  {CYAN}/nodes{RESET}                    - List active nearby mesh nodes in real-time
   {CYAN}/msg <node> <message>{RESET}   - Send direct offline chat message to node
   {CYAN}/broadcast <message>{RESET}   - Broadcast message to all nearby mesh nodes
-  {CYAN}/sos [message]{RESET}         - Send urgent emergency alert with GPS coordinates
+  {CYAN}/sos [message]{RESET}         - Send urgent emergency alert with real-time GPS coordinates
+  {CYAN}/location{RESET}                 - View or update node GPS/manual location coordinates
   {CYAN}/history{RESET}                  - View stored message history
   {CYAN}/status{RESET}                 - View node status, IP address, and ports
   {CYAN}/connect <ip> [port]{RESET}     - Manually connect to peer IP address (default port 9876)
@@ -45,9 +46,22 @@ class CLI:
         self.node = node
         self.running = True
 
+    def get_prompt_str(self):
+        peer_cnt = len(self.node.get_active_peers())
+        return f"[{CYAN}{self.node.node_id}{RESET} | Peers: {GREEN}{peer_cnt}{RESET}] > "
+
     def display_banner(self):
         peers = self.node.get_active_peers()
         print(BANNER_TEMPLATE.format(node_id=self.node.node_id, peer_count=len(peers)))
+
+    def on_peer_change(self, event_type, peer_node_id, active_count):
+        if event_type == "joined":
+            print(f"\n{GREEN}{BOLD}[+] Peer {peer_node_id} joined nearby mesh (Active peers: {active_count}){RESET}")
+        elif event_type == "left":
+            print(f"\n{YELLOW}{BOLD}[-] Peer {peer_node_id} disconnected (Active peers: {active_count}){RESET}")
+
+        sys.stdout.write(self.get_prompt_str())
+        sys.stdout.flush()
 
     def on_display_msg(self, msg):
         msg_type = msg.get("type")
@@ -69,8 +83,8 @@ class CLI:
         elif msg_type == "chat":
             target = "YOU" if recipient == self.node.node_id else recipient
             print(f"\n[{ts}] {CYAN}{BOLD}{sender}{RESET} > {BOLD}{target}{RESET}: {text}")
-        
-        sys.stdout.write("> ")
+
+        sys.stdout.write(self.get_prompt_str())
         sys.stdout.flush()
 
     def on_status_update(self, msg_id, status):
@@ -83,11 +97,15 @@ class CLI:
         elif status == "BROADCAST":
             print(f"{GREEN}✓ Message broadcasted{RESET}")
 
-        sys.stdout.write("> ")
+        sys.stdout.write(self.get_prompt_str())
         sys.stdout.flush()
 
     async def run(self):
-        self.node.set_callbacks(self.on_display_msg, self.on_status_update)
+        self.node.set_callbacks(
+            on_display_msg=self.on_display_msg,
+            on_status_update=self.on_status_update,
+            on_peer_change=self.on_peer_change
+        )
         await self.node.start()
         self.display_banner()
 
@@ -95,7 +113,7 @@ class CLI:
 
         while self.running:
             try:
-                line = await loop.run_in_executor(None, input, "> ")
+                line = await loop.run_in_executor(None, input, self.get_prompt_str())
                 line = line.strip()
                 if not line:
                     continue
@@ -113,7 +131,7 @@ class CLI:
         await self.node.stop()
 
     async def process_command(self, cmd_line):
-        parts = cmd_line.split(" ", 2)
+        parts = cmd_line.split(" ")
         cmd = parts[0].lower()
 
         if cmd == "/help":
@@ -125,27 +143,51 @@ class CLI:
             if not peers:
                 print(f"{YELLOW}No active nearby mesh nodes found.{RESET}")
             else:
-                print(f"\n{BOLD}Nearby nodes:{RESET}")
+                print(f"\n{BOLD}Real-Time Nearby Nodes ({len(peers)} active):{RESET}")
                 now = time.time()
                 for p in peers:
                     ago = int(now - p["last_seen"])
                     print(f"  {CYAN}{p['node_id']:<15}{RESET} {p['address']:<15}:{p['port']}  last seen {ago} sec ago")
                 print()
         elif cmd == "/msg":
-            if len(parts) < 3:
+            sub_parts = cmd_line.split(" ", 2)
+            if len(sub_parts) < 3:
                 print(f"{YELLOW}Usage: /msg <node_id> <message>{RESET}")
                 return
-            target_node = parts[1]
-            text = parts[2]
+            target_node = sub_parts[1]
+            text = sub_parts[2]
             print(f"{GREEN}✓ Message queued{RESET}")
             await self.node.send_chat(target_node, text)
         elif cmd == "/broadcast":
-            if len(parts) < 2:
+            text = cmd_line[len("/broadcast"):].strip()
+            if not text:
                 print(f"{YELLOW}Usage: /broadcast <message>{RESET}")
                 return
-            text = cmd_line[len("/broadcast"):].strip()
             print(f"{GREEN}✓ Broadcast message queued{RESET}")
             await self.node.send_broadcast(text)
+        elif cmd == "/location":
+            if len(parts) >= 4 and parts[1].lower() == "set":
+                lat, lon = parts[2], parts[3]
+                success = self.node.set_manual_location(lat, lon)
+                if success:
+                    print(f"{GREEN}✓ Location manually set to ({lat}, {lon}){RESET}")
+                else:
+                    print(f"{RED}Invalid coordinates. Usage: /location set <latitude> <longitude>{RESET}")
+            elif len(parts) >= 2 and parts[1].lower() == "clear":
+                self.node.location_manager.clear_manual_location()
+                print(f"{GREEN}✓ Manual location cleared. Reverted to automatic GPS lookup.{RESET}")
+            else:
+                loc = self.node.location_manager.get_location()
+                if loc:
+                    provider = loc.get("provider", "gps")
+                    ts = format_time(loc.get("timestamp", time.time()))
+                    print(f"\n{BOLD}Current Node Location:{RESET}")
+                    print(f"  Latitude:  {CYAN}{loc['latitude']}{RESET}")
+                    print(f"  Longitude: {CYAN}{loc['longitude']}{RESET}")
+                    print(f"  Provider:  {provider}")
+                    print(f"  Updated:   {ts}\n")
+                else:
+                    print(f"{YELLOW}Location: UNKNOWN (Termux:API GPS scanning in background. You can set manually using '/location set <lat> <lon>'){RESET}")
         elif cmd == "/sos":
             text = cmd_line[len("/sos"):].strip()
             if not text:
@@ -157,7 +199,7 @@ class CLI:
             lat = msg.get("latitude")
             lon = msg.get("longitude")
             loc_str = f"{lat}, {lon}" if lat != "UNKNOWN" else "UNKNOWN"
-            print(f"Location: {loc_str}\n")
+            print(f"Location: {RED}{loc_str}{RESET}\n")
         elif cmd == "/history":
             history = self.node.get_history(limit=20)
             if not history:
@@ -182,12 +224,16 @@ class CLI:
                 ip = "127.0.0.1 (Offline)"
 
             peers = self.node.get_active_peers()
+            loc = self.node.location_manager.get_location()
+            loc_str = f"{loc['latitude']}, {loc['longitude']}" if loc else "UNKNOWN"
+
             print(f"\n{BOLD}EmergencyMesh Node Status:{RESET}")
             print(f"  Node ID:     {CYAN}{self.node.node_id}{RESET}")
             print(f"  Local IP:    {ip}")
             print(f"  TCP Port:    {self.node.config.tcp_port}")
             print(f"  UDP Port:    {self.node.config.udp_port}")
-            print(f"  Peer Count:  {len(peers)}")
+            print(f"  Peer Count:  {GREEN}{len(peers)}{RESET}")
+            print(f"  Location:    {loc_str}")
             print(f"  DB Path:     {self.node.config.db_path}\n")
         elif cmd == "/connect":
             if len(parts) < 2:

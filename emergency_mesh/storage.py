@@ -103,10 +103,16 @@ class Storage:
             rows = cursor.fetchall()
             return [dict(r) for r in rows]
 
-    def upsert_peer(self, node_id, address, port):
+    def upsert_peer(self, node_id, address, port, expiry_seconds=30):
         now = int(time.time())
+        cutoff = now - expiry_seconds
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute("SELECT last_seen FROM peers WHERE node_id = ?", (node_id,))
+            existing = cursor.fetchone()
+            is_new = (existing is None) or (existing["last_seen"] < cutoff)
+
             cursor.execute("""
                 INSERT INTO peers (node_id, address, port, last_seen)
                 VALUES (?, ?, ?, ?)
@@ -116,6 +122,11 @@ class Storage:
                     last_seen = excluded.last_seen
             """, (node_id, address, port, now))
             conn.commit()
+
+            cursor.execute("SELECT COUNT(*) as active_cnt FROM peers WHERE last_seen >= ?", (cutoff,))
+            active_count = cursor.fetchone()["active_cnt"]
+
+            return is_new, active_count
 
     def get_active_peers(self, expiry_seconds=30):
         cutoff = int(time.time()) - expiry_seconds
