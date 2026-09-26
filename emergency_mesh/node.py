@@ -15,7 +15,7 @@ class Node:
         self.config = Config(config_dir=config_dir, node_id_override=node_id, port_override=port)
         self.node_id = self.config.node_id
         self.storage = Storage(self.config.db_path)
-        self.location_manager = get_location_manager()
+        self.location_manager = get_location_manager(config_dir=self.config.config_dir)
 
         self.on_display_msg_cb = None
         self.on_status_update_cb = None

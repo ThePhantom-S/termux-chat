@@ -194,11 +194,25 @@ class CLI:
                     print(f"{RED}Invalid coordinates. Usage: /location set <latitude> <longitude>{RESET}")
             elif len(parts) >= 2 and parts[1].lower() == "clear":
                 self.node.location_manager.clear_manual_location()
-                print(f"{GREEN}✓ Manual location cleared. Reverted to automatic GPS lookup.{RESET}")
+                print(f"{GREEN}✓ Manual location cleared. Reverted to automatic lookup.{RESET}")
+            elif len(parts) >= 2 and parts[1].lower() in ("refresh", "update"):
+                print(f"{CYAN}Refreshing location lookup (GPS / IP)...{RESET}")
+                loop = asyncio.get_event_loop()
+                loc = await loop.run_in_executor(None, self.node.location_manager.get_location_fresh)
+                if loc:
+                    provider = loc.get("provider", "unknown")
+                    ts = format_time(loc.get("timestamp", time.time()))
+                    print(f"\n{BOLD}Location Updated:{RESET}")
+                    print(f"  Latitude:  {CYAN}{loc['latitude']}{RESET}")
+                    print(f"  Longitude: {CYAN}{loc['longitude']}{RESET}")
+                    print(f"  Provider:  {provider}")
+                    print(f"  Updated:   {ts}\n")
+                else:
+                    print(f"{YELLOW}Location: UNKNOWN. Try manually setting coordinates with '/location set <lat> <lon>'{RESET}")
             else:
                 loc = self.node.location_manager.get_location()
                 if loc:
-                    provider = loc.get("provider", "gps")
+                    provider = loc.get("provider", "unknown")
                     ts = format_time(loc.get("timestamp", time.time()))
                     print(f"\n{BOLD}Current Node Location:{RESET}")
                     print(f"  Latitude:  {CYAN}{loc['latitude']}{RESET}")
@@ -206,7 +220,8 @@ class CLI:
                     print(f"  Provider:  {provider}")
                     print(f"  Updated:   {ts}\n")
                 else:
-                    print(f"{YELLOW}Location: UNKNOWN (Termux:API GPS scanning in background. Set manually using '/location set <lat> <lon>'){RESET}")
+                    print(f"{YELLOW}Location: UNKNOWN (Searching via Termux GPS / IP Geolocation in background).{RESET}")
+                    print(f"{YELLOW}You can force a lookup with '/location refresh' or set coordinates manually using '/location set <lat> <lon>'{RESET}")
         elif cmd == "/sos":
             if len(parts) >= 2 and parts[1].lower() == "radius":
                 if len(parts) >= 3:

@@ -124,7 +124,7 @@ Message: Medical assistance required in Sector 4
 | `/msg <node_id> <message>` | Send direct offline text message to specific node |
 | `/broadcast <message>` | Broadcast message to all nearby nodes |
 | `/sos [message]` | Broadcast high-priority emergency alert with GPS location |
-| `/location` | View or set node GPS/manual location coordinates (`/location set <lat> <lon>`) |
+| `/location` | View, refresh, or set node location coordinates (`/location set <lat> <lon>`, `/location refresh`, `/location clear`) |
 | `/history` | View stored message history from SQLite database |
 | `/status` | View node configuration, local IP address, and ports |
 | `/connect <ip> [port]` | Manually connect to peer IP address |
@@ -142,7 +142,7 @@ Message: Medical assistance required in Sector 4
   - Duplicate message suppression cache.
   - Automatic delivery acknowledgements (`ACK`).
   - SQLite offline message queue with automatic retry worker.
-- **GPS Coordinates**: Queries `termux-location` CLI via standard Python `subprocess`. Falls back to `UNKNOWN` if GPS fix is unavailable.
+- **GPS Coordinates & Location Manager**: Queries `termux-location` CLI via standard Python `subprocess`. Automatically falls back to IP Geolocation (`ip-api`, `ipapi`, `ipinfo`) when GPS fix is unavailable or running on non-Termux systems. Supports manual coordinate overrides (`/location set <lat> <lon>`) and local persistence.
 - **Database Storage**: SQLite database stored locally at `~/.emergency_mesh/mesh.db`.
 
 ---
