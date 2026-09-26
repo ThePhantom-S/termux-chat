@@ -29,6 +29,8 @@ HELP_TEXT = f"""
   {CYAN}/nodes{RESET}                    - List active nearby mesh nodes in real-time
   {CYAN}/msg <node> <message>{RESET}   - Send direct offline chat message to node
   {CYAN}/broadcast <message>{RESET}   - Broadcast message to all nearby mesh nodes
+  {CYAN}/record <node|broadcast> [s] - Record and send offline voice note (default 5s)
+  {CYAN}/play <message_id>{RESET}        - Play received voice note audio payload
   {CYAN}/sos [message]{RESET}         - Send urgent emergency alert with real-time GPS coordinates
   {CYAN}/sos radius [meters]{RESET}   - View or set proximity vibration alert radius (default 6m)
   {CYAN}/location{RESET}                 - View or update node GPS/manual location coordinates
@@ -97,6 +99,12 @@ class CLI:
             print(f"{RED}Location: {loc_str}{RESET}")
             print(f"{RED}Message: {text}{RESET}\n")
 
+        elif msg_type == "audio":
+            msg_id_short = msg.get("id", "")[:8]
+            duration = msg.get("audio_duration", 5)
+            print(f"\n[{ts}] {CYAN}{BOLD}🎤 VOICE NOTE ({duration}s) FROM {sender}{RESET}")
+            print(f"  Message ID: {msg_id_short}")
+            print(f"  Play command: {GREEN}/play {msg_id_short}{RESET}\n")
         elif msg_type == "broadcast":
             print(f"\n[{ts}] {YELLOW}[BROADCAST]{RESET} {BOLD}{sender}{RESET} > *: {text}")
         elif msg_type == "chat":
@@ -184,6 +192,35 @@ class CLI:
                 return
             print(f"{GREEN}✓ Broadcast message queued{RESET}")
             await self.node.send_broadcast(text)
+        elif cmd == "/record":
+            if len(parts) < 2:
+                print(f"{YELLOW}Usage: /record <node_id|broadcast> [duration_seconds]{RESET}")
+                return
+            target = parts[1]
+            duration = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 5
+            recipient = "*" if target.lower() == "broadcast" else target
+            print(f"{CYAN}🎙️ Recording voice note ({duration}s)... Speak into microphone!{RESET}")
+            msg = await self.node.send_audio(recipient, duration_seconds=duration)
+            if msg:
+                print(f"{GREEN}✓ Voice note recorded and queued for transmission ({duration}s){RESET}")
+            else:
+                print(f"{RED}Recording or audio encoding failed.{RESET}")
+        elif cmd == "/play":
+            if len(parts) < 2:
+                print(f"{YELLOW}Usage: /play <message_id>{RESET}")
+                return
+            target_id = parts[1]
+            full_msg_id = target_id
+            for m in self.node.get_history(limit=50):
+                if m["id"].startswith(target_id):
+                    full_msg_id = m["id"]
+                    break
+
+            success, info = self.node.play_audio_message(full_msg_id)
+            if success:
+                print(f"{GREEN}▶ {info}{RESET}")
+            else:
+                print(f"{RED}Playback failed: {info}{RESET}")
         elif cmd == "/location":
             if len(parts) >= 4 and parts[1].lower() == "set":
                 lat, lon = parts[2], parts[3]

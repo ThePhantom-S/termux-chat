@@ -6,7 +6,8 @@ from .transport import Transport
 from .discovery import Discovery
 from .router import Router
 from .gps import get_location_manager, haversine_distance, trigger_vibration, trigger_sos_alarm
-from .protocol import create_chat_message, create_broadcast_message, create_sos_message
+from .protocol import create_chat_message, create_broadcast_message, create_sos_message, create_audio_message
+from .audio import AudioManager
 
 VIBRATION_COOLDOWN_SECONDS = 60
 
@@ -16,6 +17,7 @@ class Node:
         self.node_id = self.config.node_id
         self.storage = Storage(self.config.db_path)
         self.location_manager = get_location_manager(config_dir=self.config.config_dir)
+        self.audio_manager = AudioManager(audio_dir=self.config.audio_dir)
 
         self.on_display_msg_cb = None
         self.on_status_update_cb = None
@@ -56,6 +58,15 @@ class Node:
     def _handle_display_msg(self, msg):
         msg_type = msg.get("type")
         msg_id = msg.get("id")
+
+        if msg_type == "audio":
+            # Automatically decode incoming audio payload to disk file
+            audio_data = msg.get("audio_data")
+            if audio_data:
+                fmt = msg.get("audio_format", "wav")
+                out_path = self.config.audio_dir / f"recv_{msg_id[:8]}.{fmt}"
+                self.audio_manager.decode_base64_to_audio(audio_data, out_path)
+                msg["_local_audio_path"] = str(out_path)
 
         if msg_type == "sos":
             my_loc = self.location_manager.get_location()
@@ -158,6 +169,46 @@ class Node:
         msg = create_sos_message(self.node_id, text, latitude=lat, longitude=lon)
         await self.router.send_message(msg)
         return msg
+
+    async def send_audio(self, recipient, duration_seconds=5):
+        loop = asyncio.get_event_loop()
+        rec_path = await loop.run_in_executor(None, self.audio_manager.record_voice_note, duration_seconds)
+        if not rec_path:
+            return None
+
+        audio_b64 = self.audio_manager.encode_audio_to_base64(rec_path)
+        if not audio_b64:
+            return None
+
+        msg = create_audio_message(
+            sender=self.node_id,
+            recipient=recipient,
+            audio_base64=audio_b64,
+            duration_seconds=duration_seconds,
+            audio_format="wav"
+        )
+        await self.router.send_message(msg)
+        return msg
+
+    def play_audio_message(self, msg_id):
+        msg = self.storage.get_message(msg_id)
+        if not msg:
+            return False, "Message not found"
+
+        audio_b64 = msg.get("audio_data")
+        if not audio_b64:
+            return False, "Message does not contain voice note payload"
+
+        fmt = msg.get("audio_format", "wav")
+        audio_path = self.config.audio_dir / f"play_{msg_id[:8]}.{fmt}"
+
+        if not audio_path.exists():
+            self.audio_manager.decode_base64_to_audio(audio_b64, audio_path)
+
+        success = self.audio_manager.play_audio(audio_path)
+        if success:
+            return True, f"Playing voice note ({msg.get('audio_duration', 5)}s)..."
+        return False, "Media player playback unavailable"
 
     def set_manual_location(self, lat, lon):
         return self.location_manager.set_manual_location(lat, lon)

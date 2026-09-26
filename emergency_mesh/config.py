@@ -13,7 +13,7 @@ DEFAULT_UDP_PORT = 9877
 DEFAULT_CHAT_TTL = 5
 DEFAULT_SOS_TTL = 8
 DEFAULT_SOS_PROXIMITY_RADIUS = 6  # Default 6 meters proximity threshold
-MAX_PACKET_SIZE = 65536  # 64 KB limit
+MAX_PACKET_SIZE = 131072  # 128 KB limit
 PEER_EXPIRY_SECONDS = 30
 BEACON_INTERVAL_SECONDS = 5
 
@@ -23,6 +23,8 @@ class Config:
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.config_file = self.config_dir / "config.json"
         self.db_path = self.config_dir / "mesh.db"
+        self.audio_dir = self.config_dir / "audio"
+        self.audio_dir.mkdir(parents=True, exist_ok=True)
 
         self.tcp_port = port_override or DEFAULT_TCP_PORT
         self.udp_port = DEFAULT_UDP_PORT

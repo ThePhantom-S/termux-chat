@@ -33,9 +33,22 @@ class Storage:
                     longitude REAL,
                     timestamp INTEGER,
                     ttl INTEGER,
-                    status TEXT
+                    status TEXT,
+                    audio_data TEXT,
+                    audio_duration INTEGER,
+                    audio_format TEXT
                 )
             """)
+            # Schema migration for existing databases
+            cursor.execute("PRAGMA table_info(messages)")
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "audio_data" not in columns:
+                cursor.execute("ALTER TABLE messages ADD COLUMN audio_data TEXT")
+            if "audio_duration" not in columns:
+                cursor.execute("ALTER TABLE messages ADD COLUMN audio_duration INTEGER")
+            if "audio_format" not in columns:
+                cursor.execute("ALTER TABLE messages ADD COLUMN audio_format TEXT")
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS peers (
                     node_id TEXT PRIMARY KEY,
@@ -65,13 +78,18 @@ class Storage:
         else:
             lon = None
 
+        audio_data = msg.get("audio_data")
+        audio_duration = msg.get("audio_duration")
+        audio_format = msg.get("audio_format")
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT OR REPLACE INTO messages (
                     id, sender, recipient, type, priority, text,
-                    latitude, longitude, timestamp, ttl, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    latitude, longitude, timestamp, ttl, status,
+                    audio_data, audio_duration, audio_format
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 msg.get("id"),
                 msg.get("sender"),
@@ -83,7 +101,10 @@ class Storage:
                 lon,
                 int(msg.get("timestamp", time.time())),
                 int(msg.get("ttl", 5)),
-                status
+                status,
+                audio_data,
+                audio_duration,
+                audio_format
             ))
             conn.commit()
 

@@ -2,9 +2,10 @@ import json
 import time
 import uuid
 
-MESSAGE_TYPES = {"chat", "sos", "ack", "broadcast"}
+MESSAGE_TYPES = {"chat", "sos", "ack", "broadcast", "audio"}
 MAX_TTL = 20
 MAX_TEXT_LENGTH = 4096
+MAX_AUDIO_DATA_LENGTH = 200000  # Base64 string limit (~150KB audio)
 
 def generate_msg_id():
     return str(uuid.uuid4())
@@ -43,6 +44,21 @@ def create_sos_message(sender, text, latitude=None, longitude=None, ttl=8):
         "text": text,
         "latitude": latitude if latitude is not None else "UNKNOWN",
         "longitude": longitude if longitude is not None else "UNKNOWN",
+        "timestamp": int(time.time()),
+        "ttl": int(ttl)
+    }
+
+def create_audio_message(sender, recipient, audio_base64, duration_seconds=5, audio_format="aac", ttl=5):
+    return {
+        "id": generate_msg_id(),
+        "sender": sender,
+        "recipient": recipient,
+        "type": "audio",
+        "priority": "high",
+        "audio_data": audio_base64,
+        "audio_duration": int(duration_seconds),
+        "audio_format": str(audio_format),
+        "text": f"🎤 Voice Note ({duration_seconds}s)",
         "timestamp": int(time.time()),
         "ttl": int(ttl)
     }
@@ -120,6 +136,11 @@ def validate_message(msg):
         text = msg.get("text", "")
         if not isinstance(text, str) or len(text) > MAX_TEXT_LENGTH:
             return False, f"Invalid 'text' field (length > {MAX_TEXT_LENGTH})"
+
+    if msg_type == "audio":
+        audio_data = msg.get("audio_data")
+        if not audio_data or not isinstance(audio_data, str) or len(audio_data) > MAX_AUDIO_DATA_LENGTH:
+            return False, "Invalid or oversized 'audio_data'"
 
     if msg_type == "ack":
         ack_msg_id = msg.get("ack_msg_id")
