@@ -9,6 +9,7 @@ from emergency_mesh.protocol import (
     deserialize_message,
     validate_message
 )
+from emergency_mesh.gps import haversine_distance
 
 class TestProtocol(unittest.TestCase):
     def test_create_and_validate_chat_message(self):
@@ -33,6 +34,15 @@ class TestProtocol(unittest.TestCase):
         is_valid, err = validate_message(msg)
         self.assertTrue(is_valid, err)
 
+    def test_haversine_distance_calculation(self):
+        # 0.00045 degrees latitude difference is ~50 meters
+        lat1, lon1 = 13.082700, 80.270700
+        lat2, lon2 = 13.083150, 80.270700
+
+        dist = haversine_distance(lat1, lon1, lat2, lon2)
+        self.assertIsNotNone(dist)
+        self.assertTrue(30 < dist < 80, f"Expected distance ~50m, got {dist}")
+
     def test_serialization_roundtrip(self):
         msg = create_broadcast_message("NODE-X", "Warning")
         raw = serialize_message(msg)
@@ -40,17 +50,14 @@ class TestProtocol(unittest.TestCase):
         self.assertEqual(msg, deserialized)
 
     def test_invalid_messages(self):
-        # Invalid type
         bad_msg = {"type": "unknown", "id": "1", "sender": "A", "recipient": "B", "ttl": 5, "timestamp": 100}
         is_valid, err = validate_message(bad_msg)
         self.assertFalse(is_valid)
 
-        # TTL out of range
         bad_ttl = create_chat_message("A", "B", "Hi", ttl=99)
         is_valid, err = validate_message(bad_ttl)
         self.assertFalse(is_valid)
 
-        # Missing ID
         no_id = create_chat_message("A", "B", "Hi")
         del no_id["id"]
         is_valid, err = validate_message(no_id)

@@ -12,6 +12,7 @@ DEFAULT_TCP_PORT = 9876
 DEFAULT_UDP_PORT = 9877
 DEFAULT_CHAT_TTL = 5
 DEFAULT_SOS_TTL = 8
+DEFAULT_SOS_PROXIMITY_RADIUS = 100  # Default 100 meters
 MAX_PACKET_SIZE = 65536  # 64 KB limit
 PEER_EXPIRY_SECONDS = 30
 BEACON_INTERVAL_SECONDS = 5
@@ -26,9 +27,9 @@ class Config:
         self.tcp_port = port_override or DEFAULT_TCP_PORT
         self.udp_port = DEFAULT_UDP_PORT
         if port_override:
-            # Shift UDP port relatively if custom TCP port is specified (useful for simulation)
             self.udp_port = port_override + 100
 
+        self.sos_proximity_radius = DEFAULT_SOS_PROXIMITY_RADIUS
         self.node_id = node_id_override
         self.load_or_create()
 
@@ -46,6 +47,7 @@ class Config:
                     data = json.load(f)
                     if not self.node_id:
                         self.node_id = data.get("node_id")
+                    self.sos_proximity_radius = data.get("sos_proximity_radius", DEFAULT_SOS_PROXIMITY_RADIUS)
             except Exception:
                 pass
 
@@ -58,7 +60,8 @@ class Config:
         data = {
             "node_id": self.node_id,
             "tcp_port": self.tcp_port,
-            "udp_port": self.udp_port
+            "udp_port": self.udp_port,
+            "sos_proximity_radius": self.sos_proximity_radius
         }
         with open(self.config_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)

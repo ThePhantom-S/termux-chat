@@ -5,8 +5,10 @@ from .storage import Storage
 from .transport import Transport
 from .discovery import Discovery
 from .router import Router
-from .gps import get_location_manager
+from .gps import get_location_manager, haversine_distance, trigger_vibration
 from .protocol import create_chat_message, create_broadcast_message, create_sos_message
+
+VIBRATION_COOLDOWN_SECONDS = 60
 
 class Node:
     def __init__(self, config_dir=None, node_id=None, port=None, enable_discovery=True):
@@ -20,6 +22,7 @@ class Node:
         self.on_peer_change_cb = None
 
         self.known_active_peers = set()
+        self.vibrated_sos_timestamps = {}
 
         self.router = Router(
             self.node_id,
@@ -51,6 +54,30 @@ class Node:
         self.on_peer_change_cb = on_peer_change
 
     def _handle_display_msg(self, msg):
+        msg_type = msg.get("type")
+        msg_id = msg.get("id")
+
+        if msg_type == "sos":
+            my_loc = self.location_manager.get_location()
+            sender_lat = msg.get("latitude")
+            sender_lon = msg.get("longitude")
+
+            if my_loc and sender_lat not in (None, "UNKNOWN") and sender_lon not in (None, "UNKNOWN"):
+                dist = haversine_distance(
+                    my_loc["latitude"], my_loc["longitude"],
+                    sender_lat, sender_lon
+                )
+                msg["_distance_meters"] = dist
+
+                if dist is not None and dist <= self.config.sos_proximity_radius:
+                    msg["_is_proximity_alert"] = True
+
+                    now = time.time()
+                    last_vibrated = self.vibrated_sos_timestamps.get(msg_id, 0)
+                    if (now - last_vibrated) > VIBRATION_COOLDOWN_SECONDS:
+                        trigger_vibration(1500)
+                        self.vibrated_sos_timestamps[msg_id] = now
+
         if self.on_display_msg_cb:
             self.on_display_msg_cb(msg)
 
@@ -71,13 +98,11 @@ class Node:
                 active_peers = self.storage.get_active_peers(expiry_seconds=30)
                 current_active_ids = {p["node_id"] for p in active_peers}
 
-                # Check joined
                 newly_joined = current_active_ids - self.known_active_peers
                 for pid in newly_joined:
                     if self.on_peer_change_cb:
                         self.on_peer_change_cb("joined", pid, len(current_active_ids))
 
-                # Check left
                 newly_left = self.known_active_peers - current_active_ids
                 for pid in newly_left:
                     if self.on_peer_change_cb:
@@ -132,6 +157,14 @@ class Node:
 
     def set_manual_location(self, lat, lon):
         return self.location_manager.set_manual_location(lat, lon)
+
+    def set_sos_proximity_radius(self, meters):
+        try:
+            self.config.sos_proximity_radius = int(meters)
+            self.config.save()
+            return True
+        except (ValueError, TypeError):
+            return False
 
     def connect_peer(self, ip, port=9876):
         dummy_id = f"PEER-{ip.replace('.', '')[-4:]}"

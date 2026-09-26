@@ -2,6 +2,43 @@ import subprocess
 import json
 import time
 import asyncio
+import math
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """
+    Calculates great circle distance between two (lat, lon) coordinates in meters.
+    Returns float distance in meters, or None if coordinates are invalid/UNKNOWN.
+    """
+    try:
+        lat1, lon1, lat2, lon2 = map(float, [lat1, lon1, lat2, lon2])
+    except (ValueError, TypeError):
+        return None
+
+    R = 6371000.0  # Radius of Earth in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = math.sin(delta_phi / 2.0)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0)**2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+
+    return R * c
+
+def trigger_vibration(duration_ms=1000):
+    """
+    Triggers physical device vibration using `termux-vibrate` via subprocess.
+    Fails gracefully if Termux:API is not installed or running on desktop.
+    """
+    try:
+        subprocess.Popen(
+            ["termux-vibrate", "-d", str(duration_ms)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        return True
+    except Exception:
+        return False
 
 class LocationManager:
     def __init__(self):
@@ -45,7 +82,7 @@ class LocationManager:
         return self.cached_location
 
     def _fetch_termux_location_fast(self):
-        # 1. Try last known location (instant execution, doesn't lock GPS hardware)
+        # Try last known location first (instant execution, doesn't lock GPS hardware)
         commands = [
             ["termux-location", "-r", "last"],
             ["termux-location", "-p", "network", "-r", "once"],
@@ -84,7 +121,6 @@ class LocationManager:
 
         while self.running:
             try:
-                # Run fetch in background thread executor so asyncio loop is never blocked
                 loc = await loop.run_in_executor(None, self._fetch_termux_location_fast)
                 if loc:
                     self.cached_location = loc

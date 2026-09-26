@@ -30,6 +30,7 @@ HELP_TEXT = f"""
   {CYAN}/msg <node> <message>{RESET}   - Send direct offline chat message to node
   {CYAN}/broadcast <message>{RESET}   - Broadcast message to all nearby mesh nodes
   {CYAN}/sos [message]{RESET}         - Send urgent emergency alert with real-time GPS coordinates
+  {CYAN}/sos radius [meters]{RESET}   - View or set proximity vibration alert radius (default 100m)
   {CYAN}/location{RESET}                 - View or update node GPS/manual location coordinates
   {CYAN}/history{RESET}                  - View stored message history
   {CYAN}/status{RESET}                 - View node status, IP address, and ports
@@ -40,6 +41,14 @@ HELP_TEXT = f"""
 
 def format_time(ts):
     return time.strftime("%H:%M:%S", time.localtime(ts))
+
+def format_distance(meters):
+    if meters is None:
+        return "UNKNOWN"
+    if meters >= 1000:
+        return f"{meters / 1000.0:.2f} km ({int(meters)} meters)"
+    else:
+        return f"{int(meters)} meters"
 
 class CLI:
     def __init__(self, node):
@@ -74,10 +83,20 @@ class CLI:
             lat = msg.get("latitude", "UNKNOWN")
             lon = msg.get("longitude", "UNKNOWN")
             loc_str = f"{lat}, {lon}" if lat != "UNKNOWN" else "UNKNOWN"
+            dist_meters = msg.get("_distance_meters")
+            is_proximity = msg.get("_is_proximity_alert", False)
 
-            print(f"\n{RED}{BOLD}🚨 SOS FROM {sender}{RESET}")
+            if is_proximity:
+                print(f"\n{RED}{BOLD}🚨 PROXIMITY SOS ALERT (WITHIN {format_distance(dist_meters)})!{RESET}")
+            else:
+                print(f"\n{RED}{BOLD}🚨 SOS FROM {sender}{RESET}")
+
+            print(f"{RED}Sender Node: {sender}{RESET}")
+            if dist_meters is not None:
+                print(f"{RED}Approx. Distance: {format_distance(dist_meters)}{RESET}")
             print(f"{RED}Location: {loc_str}{RESET}")
             print(f"{RED}Message: {text}{RESET}\n")
+
         elif msg_type == "broadcast":
             print(f"\n[{ts}] {YELLOW}[BROADCAST]{RESET} {BOLD}{sender}{RESET} > *: {text}")
         elif msg_type == "chat":
@@ -187,8 +206,21 @@ class CLI:
                     print(f"  Provider:  {provider}")
                     print(f"  Updated:   {ts}\n")
                 else:
-                    print(f"{YELLOW}Location: UNKNOWN (Termux:API GPS scanning in background. You can set manually using '/location set <lat> <lon>'){RESET}")
+                    print(f"{YELLOW}Location: UNKNOWN (Termux:API GPS scanning in background. Set manually using '/location set <lat> <lon>'){RESET}")
         elif cmd == "/sos":
+            if len(parts) >= 2 and parts[1].lower() == "radius":
+                if len(parts) >= 3:
+                    meters = parts[2]
+                    success = self.node.set_sos_proximity_radius(meters)
+                    if success:
+                        print(f"{GREEN}✓ SOS proximity vibration alert radius set to {meters} meters{RESET}")
+                    else:
+                        print(f"{RED}Invalid radius. Usage: /sos radius <meters>{RESET}")
+                else:
+                    current_r = self.node.config.sos_proximity_radius
+                    print(f"\n{BOLD}Current SOS Proximity Vibration Radius:{RESET} {CYAN}{current_r} meters{RESET}\n")
+                return
+
             text = cmd_line[len("/sos"):].strip()
             if not text:
                 text = "Emergency assistance required"
@@ -228,13 +260,14 @@ class CLI:
             loc_str = f"{loc['latitude']}, {loc['longitude']}" if loc else "UNKNOWN"
 
             print(f"\n{BOLD}EmergencyMesh Node Status:{RESET}")
-            print(f"  Node ID:     {CYAN}{self.node.node_id}{RESET}")
-            print(f"  Local IP:    {ip}")
-            print(f"  TCP Port:    {self.node.config.tcp_port}")
-            print(f"  UDP Port:    {self.node.config.udp_port}")
-            print(f"  Peer Count:  {GREEN}{len(peers)}{RESET}")
-            print(f"  Location:    {loc_str}")
-            print(f"  DB Path:     {self.node.config.db_path}\n")
+            print(f"  Node ID:          {CYAN}{self.node.node_id}{RESET}")
+            print(f"  Local IP:         {ip}")
+            print(f"  TCP Port:         {self.node.config.tcp_port}")
+            print(f"  UDP Port:         {self.node.config.udp_port}")
+            print(f"  Peer Count:       {GREEN}{len(peers)}{RESET}")
+            print(f"  Location:         {loc_str}")
+            print(f"  SOS Radius:       {CYAN}{self.node.config.sos_proximity_radius} meters{RESET}")
+            print(f"  DB Path:          {self.node.config.db_path}\n")
         elif cmd == "/connect":
             if len(parts) < 2:
                 print(f"{YELLOW}Usage: /connect <ip> [port]{RESET}")
