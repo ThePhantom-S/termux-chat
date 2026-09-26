@@ -3,6 +3,7 @@ import json
 import time
 import asyncio
 import math
+import sys
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     """
@@ -25,7 +26,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
     return R * c
 
-def trigger_vibration(duration_ms=1000):
+def trigger_vibration(duration_ms=1500):
     """
     Triggers physical device vibration using `termux-vibrate` via subprocess.
     Fails gracefully if Termux:API is not installed or running on desktop.
@@ -39,6 +40,44 @@ def trigger_vibration(duration_ms=1000):
         return True
     except Exception:
         return False
+
+def trigger_sos_alarm(duration_ms=2000, alert_text="Emergency SOS Alert Received"):
+    """
+    Triggers physical device vibration AND sound alarms on peer device:
+    1. Terminal audio chime bell (\a).
+    2. Physical vibration via termux-vibrate.
+    3. High-priority Android notification with sound via termux-notification.
+    4. Text-To-Speech audio alert via termux-tts-speak.
+    """
+    # 1. Terminal audio bell chime
+    try:
+        sys.stdout.write("\a\a\a")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+    # 2. Physical Vibration
+    trigger_vibration(duration_ms)
+
+    # 3. Android Notification Sound Alert
+    try:
+        subprocess.Popen(
+            ["termux-notification", "--sound", "--title", "🚨 EMERGENCY SOS ALERT", "--content", str(alert_text), "--priority", "high"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except Exception:
+        pass
+
+    # 4. Text-To-Speech Audio Voice Alert
+    try:
+        subprocess.Popen(
+            ["termux-tts-speak", "Emergency S O S alert received!"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except Exception:
+        pass
 
 class LocationManager:
     def __init__(self):
@@ -82,7 +121,6 @@ class LocationManager:
         return self.cached_location
 
     def _fetch_termux_location_fast(self):
-        # Try last known location first (instant execution, doesn't lock GPS hardware)
         commands = [
             ["termux-location", "-r", "last"],
             ["termux-location", "-p", "network", "-r", "once"],

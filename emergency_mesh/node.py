@@ -5,7 +5,7 @@ from .storage import Storage
 from .transport import Transport
 from .discovery import Discovery
 from .router import Router
-from .gps import get_location_manager, haversine_distance, trigger_vibration
+from .gps import get_location_manager, haversine_distance, trigger_vibration, trigger_sos_alarm
 from .protocol import create_chat_message, create_broadcast_message, create_sos_message
 
 VIBRATION_COOLDOWN_SECONDS = 60
@@ -72,11 +72,14 @@ class Node:
                 if dist is not None and dist <= self.config.sos_proximity_radius:
                     msg["_is_proximity_alert"] = True
 
-                    now = time.time()
-                    last_vibrated = self.vibrated_sos_timestamps.get(msg_id, 0)
-                    if (now - last_vibrated) > VIBRATION_COOLDOWN_SECONDS:
-                        trigger_vibration(1500)
-                        self.vibrated_sos_timestamps[msg_id] = now
+            # Trigger vibration + sound ring alert for incoming peer SOS with cooldown
+            now = time.time()
+            last_alarm = self.vibrated_sos_timestamps.get(msg_id, 0)
+            if (now - last_alarm) > VIBRATION_COOLDOWN_SECONDS:
+                sender_name = msg.get("sender", "Peer Node")
+                alert_text = f"SOS from {sender_name}: {msg.get('text', '')}"
+                trigger_sos_alarm(2000, alert_text)
+                self.vibrated_sos_timestamps[msg_id] = now
 
         if self.on_display_msg_cb:
             self.on_display_msg_cb(msg)
