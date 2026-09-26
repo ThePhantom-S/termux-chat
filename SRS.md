@@ -117,6 +117,7 @@ EmergencyMesh operates as a standalone, self-contained terminal application runn
 - **FR-4.2**: The system shall retrieve hardware GPS coordinates via `termux-location` in a non-blocking background thread.
 - **FR-4.3**: If hardware GPS is unavailable, the location shall default to `UNKNOWN` or manual coordinates set via `/location set <lat> <lon>`.
 - **FR-4.4**: SOS alerts received by any node shall be rendered prominently in red ANSI formatting with coordinates and timestamp.
+- **FR-4.5**: The system shall calculate the Haversine distance between receiver and SOS sender. If distance is closer than 6 meters (default `sos_proximity_radius`), the peer's phone shall trigger physical device vibration via `termux-vibrate`.
 
 ### 3.5 Delivery Acknowledgement & Offline Queue
 - **FR-5.1**: Recipients of direct chat messages shall return a high-priority `ack` packet back to the sender.

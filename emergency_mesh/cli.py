@@ -30,7 +30,7 @@ HELP_TEXT = f"""
   {CYAN}/msg <node> <message>{RESET}   - Send direct offline chat message to node
   {CYAN}/broadcast <message>{RESET}   - Broadcast message to all nearby mesh nodes
   {CYAN}/sos [message]{RESET}         - Send urgent emergency alert with real-time GPS coordinates
-  {CYAN}/sos radius [meters]{RESET}   - View or set proximity vibration alert radius (default 100m)
+  {CYAN}/sos radius [meters]{RESET}   - View or set proximity vibration alert radius (default 6m)
   {CYAN}/location{RESET}                 - View or update node GPS/manual location coordinates
   {CYAN}/history{RESET}                  - View stored message history
   {CYAN}/status{RESET}                 - View node status, IP address, and ports
