@@ -93,17 +93,22 @@ Location: 13.123456, 80.123456
 ```
 
 ### Demo Step 2: Relay on Phone B
-**Phone B** receives the SOS broadcast and automatically relays it across the mesh network:
+**Phone B** receives the SOS broadcast, calculates distance via Haversine formula, and automatically relays it across the mesh network:
 ```text
-🚨 SOS FROM RESCUE-A82F
+🚨 PROXIMITY SOS ALERT (WITHIN 45 meters)!
+Sender Node: RESCUE-A82F
+Approx. Distance: 45 meters
 Location: 13.123456, 80.123456
 Message: Medical assistance required in Sector 4
 ```
+*(Phone B vibrates via `termux-vibrate` if within proximity radius, default: 100 meters).*
 
 ### Demo Step 3: Reception on Phone C
 **Phone C** receives the forwarded SOS message from Phone A (via Phone B):
 ```text
 🚨 SOS FROM RESCUE-A82F
+Sender Node: RESCUE-A82F
+Approx. Distance: 350 meters
 Location: 13.123456, 80.123456
 Message: Medical assistance required in Sector 4
 ```
