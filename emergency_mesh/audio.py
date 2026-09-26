@@ -14,7 +14,7 @@ class AudioManager:
 
     def record_voice_note(self, duration_seconds=5, output_file=None):
         """
-        Records voice note using `termux-microphone-record` or generates fallback sample.
+        Records voice note using `termux-microphone-record`, desktop `ffmpeg`/`arecord`, or fallback sample generator.
         Returns Path to recorded file or None if recording failed.
         """
         if output_file is None:
@@ -25,22 +25,81 @@ class AudioManager:
 
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
+        # 1. Termux API Microphone Recording
         if shutil.which("termux-microphone-record"):
             try:
-                # Termux microphone recording API call
-                proc = subprocess.Popen(
-                    ["termux-microphone-record", "-f", str(output_file), "-l", str(duration_seconds)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                # Stop any previous hanging recording
+                subprocess.run(
+                    ["termux-microphone-record", "-q"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
-                time.sleep(duration_seconds + 0.5)
-                proc.terminate()
+                time.sleep(0.1)
+
+                # Start recording
+                cmd = [
+                    "termux-microphone-record",
+                    "-f", str(output_file),
+                    "-l", str(duration_seconds),
+                    "-r", "16000",
+                    "-c", "1"
+                ]
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+                time.sleep(duration_seconds + 0.2)
+
+                # Stop & flush recording
+                subprocess.run(
+                    ["termux-microphone-record", "-q"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
+                )
+
                 if output_file.exists() and output_file.stat().st_size > 0:
                     return output_file
             except Exception:
                 pass
 
-        # Fallback for desktop/testing environments: synthesize a short WAV tone audio file
+        # 2. Linux Desktop ffmpeg recording
+        if shutil.which("ffmpeg"):
+            for dev in ["pulse", "alsa"]:
+                try:
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-f", dev, "-i", "default",
+                        "-t", str(duration_seconds),
+                        "-ar", "16000", "-ac", "1",
+                        str(output_file)
+                    ]
+                    res = subprocess.run(
+                        cmd,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        timeout=duration_seconds + 4
+                    )
+                    if res.returncode == 0 and output_file.exists() and output_file.stat().st_size > 0:
+                        return output_file
+                except Exception:
+                    continue
+
+        # 3. Linux Desktop arecord recording
+        if shutil.which("arecord"):
+            try:
+                cmd = [
+                    "arecord",
+                    "-d", str(duration_seconds),
+                    "-r", "16000",
+                    "-c", "1",
+                    "-f", "S16_LE",
+                    str(output_file)
+                ]
+                subprocess.run(
+                    cmd,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=duration_seconds + 4
+                )
+                if output_file.exists() and output_file.stat().st_size > 0:
+                    return output_file
+            except Exception:
+                pass
+
+        # 4. Fallback for desktop/testing environments: synthesize a short WAV tone audio file
         return self._generate_fallback_wav(output_file, duration_seconds)
 
     def _generate_fallback_wav(self, output_file, duration_seconds=3):

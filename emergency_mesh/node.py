@@ -173,25 +173,34 @@ class Node:
     async def send_audio(self, recipient, duration_seconds=5):
         loop = asyncio.get_event_loop()
         rec_path = await loop.run_in_executor(None, self.audio_manager.record_voice_note, duration_seconds)
-        if not rec_path:
+        if not rec_path or not rec_path.exists():
             return None
 
         audio_b64 = self.audio_manager.encode_audio_to_base64(rec_path)
         if not audio_b64:
             return None
 
+        audio_fmt = rec_path.suffix.lstrip(".") or "wav"
+
         msg = create_audio_message(
             sender=self.node_id,
             recipient=recipient,
             audio_base64=audio_b64,
             duration_seconds=duration_seconds,
-            audio_format="wav"
+            audio_format=audio_fmt
         )
         await self.router.send_message(msg)
         return msg
 
-    def play_audio_message(self, msg_id):
-        msg = self.storage.get_message(msg_id)
+    def play_audio_message(self, msg_id_prefix):
+        msg = self.storage.get_message(msg_id_prefix)
+        if not msg:
+            recent = self.storage.get_recent_messages(limit=100)
+            for m in recent:
+                if m["id"].startswith(msg_id_prefix):
+                    msg = m
+                    break
+
         if not msg:
             return False, "Message not found"
 
@@ -200,6 +209,7 @@ class Node:
             return False, "Message does not contain voice note payload"
 
         fmt = msg.get("audio_format", "wav")
+        msg_id = msg.get("id", "audio")
         audio_path = self.config.audio_dir / f"play_{msg_id[:8]}.{fmt}"
 
         if not audio_path.exists():

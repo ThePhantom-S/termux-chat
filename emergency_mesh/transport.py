@@ -4,7 +4,7 @@ import json
 import inspect
 from .protocol import deserialize_message, serialize_message, validate_message
 
-MAX_PAYLOAD_SIZE = 65536  # 64 KB
+MAX_PAYLOAD_SIZE = 524288  # 512 KB limit for audio payloads
 
 class Transport:
     def __init__(self, host, port, on_message_cb):
@@ -15,7 +15,7 @@ class Transport:
 
     async def start_server(self):
         self.server = await asyncio.start_server(
-            self._handle_client, self.host, self.port
+            self._handle_client, self.host, self.port, limit=MAX_PAYLOAD_SIZE
         )
 
     async def stop_server(self):
@@ -26,7 +26,7 @@ class Transport:
     async def _handle_client(self, reader, writer):
         peer_addr = writer.get_extra_info('peername')
         try:
-            data = await asyncio.wait_for(reader.readline(), timeout=10.0)
+            data = await asyncio.wait_for(reader.readline(), timeout=15.0)
             if data:
                 if len(data) > MAX_PAYLOAD_SIZE:
                     writer.close()

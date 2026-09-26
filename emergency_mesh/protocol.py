@@ -5,7 +5,7 @@ import uuid
 MESSAGE_TYPES = {"chat", "sos", "ack", "broadcast", "audio"}
 MAX_TTL = 20
 MAX_TEXT_LENGTH = 4096
-MAX_AUDIO_DATA_LENGTH = 200000  # Base64 string limit (~150KB audio)
+MAX_AUDIO_DATA_LENGTH = 750000  # Base64 string limit (~500KB binary audio)
 
 def generate_msg_id():
     return str(uuid.uuid4())
