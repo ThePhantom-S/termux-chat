@@ -48,10 +48,21 @@ class Storage:
 
     def save_message(self, msg, status="RECEIVED"):
         lat = msg.get("latitude")
-        if isinstance(lat, str):
+        if lat is not None and lat != "UNKNOWN":
+            try:
+                lat = float(lat)
+            except (ValueError, TypeError):
+                lat = None
+        else:
             lat = None
+
         lon = msg.get("longitude")
-        if isinstance(lon, str):
+        if lon is not None and lon != "UNKNOWN":
+            try:
+                lon = float(lon)
+            except (ValueError, TypeError):
+                lon = None
+        else:
             lon = None
 
         with self._get_connection() as conn:

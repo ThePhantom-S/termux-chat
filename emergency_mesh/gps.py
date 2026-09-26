@@ -101,6 +101,17 @@ class LocationManager:
     def clear_manual_location(self):
         self.manual_override = None
 
+    def get_location_fresh(self):
+        if self.manual_override:
+            return self.manual_override
+
+        loc = self._fetch_termux_location_fast()
+        if loc:
+            self.cached_location = loc
+            return loc
+
+        return self.cached_location
+
     def get_location(self):
         """
         Returns the most accurate available location instantly from cache or manual override,

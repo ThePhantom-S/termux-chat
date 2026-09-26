@@ -149,7 +149,8 @@ class Node:
         return msg
 
     async def send_sos(self, text="Emergency assistance needed"):
-        coords = self.location_manager.get_location()
+        loop = asyncio.get_event_loop()
+        coords = await loop.run_in_executor(None, self.location_manager.get_location_fresh)
 
         lat = coords["latitude"] if coords else None
         lon = coords["longitude"] if coords else None
