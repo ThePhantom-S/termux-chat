@@ -5,9 +5,14 @@ from .storage import Storage
 from .transport import Transport
 from .discovery import Discovery
 from .router import Router
-from .gps import get_location_manager, haversine_distance, trigger_vibration, trigger_sos_alarm
-from .protocol import create_chat_message, create_broadcast_message, create_sos_message, create_audio_message
+from .gps import get_location_manager, haversine_distance, calculate_bearing, trigger_vibration, trigger_sos_alarm
 from .audio import AudioManager
+from .protocol import (
+    create_chat_message,
+    create_broadcast_message,
+    create_sos_message,
+    create_audio_message
+)
 
 VIBRATION_COOLDOWN_SECONDS = 60
 
@@ -16,8 +21,8 @@ class Node:
         self.config = Config(config_dir=config_dir, node_id_override=node_id, port_override=port)
         self.node_id = self.config.node_id
         self.storage = Storage(self.config.db_path)
-        self.location_manager = get_location_manager(config_dir=self.config.config_dir)
-        self.audio_manager = AudioManager(audio_dir=self.config.audio_dir)
+        self.location_manager = get_location_manager(self.config.config_dir)
+        self.audio_manager = AudioManager(self.config.audio_dir)
 
         self.on_display_msg_cb = None
         self.on_status_update_cb = None
@@ -59,15 +64,6 @@ class Node:
         msg_type = msg.get("type")
         msg_id = msg.get("id")
 
-        if msg_type == "audio":
-            # Automatically decode incoming audio payload to disk file
-            audio_data = msg.get("audio_data")
-            if audio_data:
-                fmt = msg.get("audio_format", "wav")
-                out_path = self.config.audio_dir / f"recv_{msg_id[:8]}.{fmt}"
-                self.audio_manager.decode_base64_to_audio(audio_data, out_path)
-                msg["_local_audio_path"] = str(out_path)
-
         if msg_type == "sos":
             my_loc = self.location_manager.get_location()
             sender_lat = msg.get("latitude")
@@ -83,7 +79,6 @@ class Node:
                 if dist is not None and dist <= self.config.sos_proximity_radius:
                     msg["_is_proximity_alert"] = True
 
-            # Trigger vibration + sound ring alert for incoming peer SOS with cooldown
             now = time.time()
             last_alarm = self.vibrated_sos_timestamps.get(msg_id, 0)
             if (now - last_alarm) > VIBRATION_COOLDOWN_SECONDS:
@@ -230,6 +225,127 @@ class Node:
             return True
         except (ValueError, TypeError):
             return False
+
+    def get_radar_nodes(self):
+        """
+        Returns (radar_dict, error_string).
+        """
+        my_loc = self.location_manager.get_location()
+        if not my_loc:
+            return None, "Location UNKNOWN. Set coordinates manually via '/location set <lat> <lon>' or turn on GPS."
+
+        my_lat = my_loc["latitude"]
+        my_lon = my_loc["longitude"]
+
+        targets = []
+        seen_target_ids = set()
+
+        # 1. Active peers
+        active_peers = self.storage.get_active_peers(expiry_seconds=30)
+        recent_msgs = self.storage.get_recent_messages(limit=100)
+
+        for p in active_peers:
+            pid = p["node_id"]
+            peer_lat, peer_lon = None, None
+            for m in recent_msgs:
+                if m["sender"] == pid and m.get("latitude") not in (None, "UNKNOWN") and m.get("longitude") not in (None, "UNKNOWN"):
+                    try:
+                        peer_lat = float(m["latitude"])
+                        peer_lon = float(m["longitude"])
+                        break
+                    except (ValueError, TypeError):
+                        pass
+
+            if peer_lat is not None and peer_lon is not None:
+                dist = haversine_distance(my_lat, my_lon, peer_lat, peer_lon)
+                bearing, cardinal = calculate_bearing(my_lat, my_lon, peer_lat, peer_lon)
+                targets.append({
+                    "id": pid,
+                    "type": "peer",
+                    "latitude": peer_lat,
+                    "longitude": peer_lon,
+                    "distance_meters": dist,
+                    "bearing": bearing,
+                    "cardinal": cardinal
+                })
+                seen_target_ids.add(pid)
+
+        # 2. Active SOS Alerts
+        recent_sos = [m for m in recent_msgs if m["type"] == "sos"]
+        for s in recent_sos:
+            s_lat = s.get("latitude")
+            s_lon = s.get("longitude")
+            s_sender = s.get("sender")
+            if s_lat not in (None, "UNKNOWN") and s_lon not in (None, "UNKNOWN"):
+                try:
+                    s_lat = float(s_lat)
+                    s_lon = float(s_lon)
+                    sos_key = f"SOS-{s_sender}"
+                    if sos_key not in seen_target_ids:
+                        dist = haversine_distance(my_lat, my_lon, s_lat, s_lon)
+                        bearing, cardinal = calculate_bearing(my_lat, my_lon, s_lat, s_lon)
+                        targets.append({
+                            "id": sos_key,
+                            "sender": s_sender,
+                            "type": "sos",
+                            "text": s.get("text", ""),
+                            "latitude": s_lat,
+                            "longitude": s_lon,
+                            "distance_meters": dist,
+                            "bearing": bearing,
+                            "cardinal": cardinal
+                        })
+                        seen_target_ids.add(sos_key)
+                except (ValueError, TypeError):
+                    pass
+
+        return {
+            "my_location": my_loc,
+            "targets": targets
+        }, None
+
+    def get_navigation_target(self, target_id):
+        radar_info, err = self.get_radar_nodes()
+        if err:
+            return None, err
+
+        my_loc = radar_info["my_location"]
+        targets = radar_info["targets"]
+
+        matched_target = None
+        target_id_upper = target_id.upper()
+
+        for t in targets:
+            if t["id"].upper().startswith(target_id_upper) or t.get("sender", "").upper().startswith(target_id_upper):
+                matched_target = t
+                break
+
+        if not matched_target and "," in target_id:
+            try:
+                parts = target_id.split(",")
+                t_lat = float(parts[0].strip())
+                t_lon = float(parts[1].strip())
+                dist = haversine_distance(my_loc["latitude"], my_loc["longitude"], t_lat, t_lon)
+                bearing, cardinal = calculate_bearing(my_loc["latitude"], my_loc["longitude"], t_lat, t_lon)
+                matched_target = {
+                    "id": f"Coordinates ({t_lat:.4f}, {t_lon:.4f})",
+                    "type": "custom",
+                    "latitude": t_lat,
+                    "longitude": t_lon,
+                    "distance_meters": dist,
+                    "bearing": bearing,
+                    "cardinal": cardinal
+                }
+            except Exception:
+                pass
+
+        if not matched_target:
+            return None, f"Target '{target_id}' not found in active peers or SOS alerts."
+
+        return {
+            "my_location": my_loc,
+            "target": matched_target
+        }, None
 
     def connect_peer(self, ip, port=9876):
         dummy_id = f"PEER-{ip.replace('.', '')[-4:]}"

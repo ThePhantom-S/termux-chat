@@ -125,6 +125,8 @@ Message: Medical assistance required in Sector 4
 | `/broadcast <message>` | Broadcast message to all nearby nodes |
 | `/sos [message]` | Broadcast high-priority emergency alert with GPS location |
 | `/location` | View, refresh, or set node location coordinates (`/location set <lat> <lon>`, `/location refresh`, `/location clear`) |
+| `/map` | Display offline ASCII radar map of nearby peers & SOS alerts (`/map open`, `/map html`) |
+| `/navigate <node_id>` | Step-by-step compass bearing (0°-360°) & distance navigation guidance to target |
 | `/history` | View stored message history from SQLite database |
 | `/status` | View node configuration, local IP address, and ports |
 | `/connect <ip> [port]` | Manually connect to peer IP address |

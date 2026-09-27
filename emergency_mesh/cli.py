@@ -2,6 +2,10 @@ import sys
 import asyncio
 import time
 import socket
+import shutil
+import subprocess
+import math
+from pathlib import Path
 
 # ANSI Color Codes
 CYAN = "\033[96m"
@@ -16,9 +20,9 @@ BANNER_TEMPLATE = f"""{CYAN}{BOLD}
 ║          EMERGENCY MESH                  ║
 ║      OFFLINE COMMUNICATION               ║
 ╠══════════════════════════════════════════╣
-║ Node: {{node_id:<27}}                    ║
+║ Node: {{node_id:<27}} ║
 ║ Network: OFFLINE MESH                    ║
-║ Nearby nodes: {{peer_count:<25}}         ║
+║ Nearby nodes: {{peer_count:<25}} ║
 ╚══════════════════════════════════════════╝{RESET}
 Type {BOLD}/help{RESET} for commands list.
 """
@@ -34,6 +38,10 @@ HELP_TEXT = f"""
   {CYAN}/sos [message]{RESET}         - Send urgent emergency alert with real-time GPS coordinates
   {CYAN}/sos radius [meters]{RESET}   - View or set proximity vibration alert radius (default 6m)
   {CYAN}/location{RESET}                 - View or update node GPS/manual location coordinates
+  {CYAN}/map{RESET}                     - Display offline ASCII radar map of nearby peers & SOS alerts
+  {CYAN}/map open [node_id]{RESET}        - Open target in Android offline maps app (OsmAnd / Organic Maps)
+  {CYAN}/map html{RESET}                - Export self-contained offline vector HTML map file
+  {CYAN}/navigate <node_id|sos>{RESET}  - Step-by-step compass bearing & distance guidance to target
   {CYAN}/history{RESET}                  - View stored message history
   {CYAN}/status{RESET}                 - View node status, IP address, and ports
   {CYAN}/connect <ip> [port]{RESET}     - Manually connect to peer IP address (default port 9876)
@@ -48,9 +56,279 @@ def format_distance(meters):
     if meters is None:
         return "UNKNOWN"
     if meters >= 1000:
-        return f"{meters / 1000.0:.2f} km ({int(meters)} meters)"
+        return f"{meters / 1000.0:.2f} km ({int(meters)}m)"
     else:
-        return f"{int(meters)} meters"
+        return f"{int(meters)}m"
+
+def render_ascii_radar(radar_info, my_node_id):
+    my_loc = radar_info["my_location"]
+    targets = radar_info["targets"]
+
+    # 11 rows x 25 columns canvas
+    grid_rows = 11
+    grid_cols = 25
+    center_r = 5
+    center_c = 12
+
+    # Canvas buffer
+    canvas = [[" " for _ in range(grid_cols)] for _ in range(grid_rows)]
+
+    # Draw grid axes
+    for r in range(grid_rows):
+        canvas[r][center_c] = "│"
+    for c in range(grid_cols):
+        canvas[center_r][c] = "─"
+    canvas[center_r][center_c] = "┼"
+
+    # Plot targets on canvas based on bearing and distance
+    # Scale max distance to grid bounds (max radius ~500m default or dynamic)
+    max_dist = max([t["distance_meters"] for t in targets if t["distance_meters"] is not None] + [100.0])
+    max_dist = max(max_dist, 50.0)
+
+    labels = []
+
+    for t in targets:
+        dist = t.get("distance_meters")
+        bearing = t.get("bearing")
+        if dist is None or bearing is None:
+            continue
+
+        # Scale distance ratio (0.0 to 1.0)
+        norm_dist = min(dist / max_dist, 1.0)
+
+        # Bearing 0° = UP (negative row), 90° = RIGHT (positive col)
+        rad = math.radians(bearing)
+        dr = -math.cos(rad) * norm_dist * 4.0  # row radius max 4
+        dc = math.sin(rad) * norm_dist * 10.0  # col radius max 10
+
+        r = int(round(center_r + dr))
+        c = int(round(center_c + dc))
+
+        r = max(1, min(grid_rows - 2, r))
+        c = max(1, min(grid_cols - 2, c))
+
+        if t["type"] == "sos":
+            canvas[r][c] = "🚨"
+        else:
+            canvas[r][c] = "●"
+
+        labels.append((r, c, t))
+
+    # Build ASCII string output
+    lines = []
+    lines.append(f"{CYAN}{BOLD}╔═══════════════════════════════════════════════════════╗{RESET}")
+    lines.append(f"{CYAN}{BOLD}║               OFFLINE MESH RADAR MAP                  ║{RESET}")
+    lines.append(f"{CYAN}{BOLD}╠═══════════════════════════════════════════════════════╣{RESET}")
+    lines.append(f"║                     {BOLD}N (0°){RESET}                             ║")
+
+    for r in range(grid_rows):
+        row_str = ""
+        for c in range(grid_cols):
+            if r == center_r and c == center_c:
+                row_str += f"{YELLOW}{BOLD}★{RESET}"
+            elif canvas[r][c] == "🚨":
+                row_str += f"{RED}{BOLD}🚨{RESET}"
+            elif canvas[r][c] == "●":
+                row_str += f"{CYAN}●{RESET}"
+            else:
+                row_str += canvas[r][c]
+
+        if r == center_r:
+            lines.append(f"║ {BOLD}W (270°){RESET} ── {row_str} ── {BOLD}E (90°){RESET} ║")
+        else:
+            lines.append(f"║           {row_str}           ║")
+
+    lines.append(f"║                     {BOLD}S (180°){RESET}                           ║")
+    lines.append(f"{CYAN}{BOLD}╚═══════════════════════════════════════════════════════╝{RESET}")
+    lines.append(f"  {YELLOW}{BOLD}★ YOU ({my_node_id}){RESET} at ({my_loc['latitude']:.6f}, {my_loc['longitude']:.6f})")
+
+    if not targets:
+        lines.append(f"\n{YELLOW}No nearby target nodes or SOS alerts detected on radar.{RESET}")
+    else:
+        lines.append(f"\n{BOLD}Target Radar Entries ({len(targets)} active):{RESET}")
+        for t in targets:
+            tid = t["id"]
+            ttype = t["type"]
+            dist_str = format_distance(t["distance_meters"])
+            bearing_deg = t["bearing"]
+            cardinal = t["cardinal"]
+
+            if ttype == "sos":
+                lines.append(f"  {RED}{BOLD}🚨 {tid:<18}{RESET} {dist_str:<12} Bearing: {CYAN}{bearing_deg}° ({cardinal}){RESET} - {t.get('text', '')}")
+            else:
+                lines.append(f"  {CYAN}●  {tid:<18}{RESET} {dist_str:<12} Bearing: {CYAN}{bearing_deg}° ({cardinal}){RESET}")
+
+    lines.append(f"\n{BOLD}Map & Navigation Commands:{RESET}")
+    lines.append(f"  {CYAN}/navigate <node_id>{RESET}  - Get compass bearing step-by-step navigation")
+    lines.append(f"  {CYAN}/map open [target]{RESET}   - Launch target in Android offline maps (OsmAnd)")
+    lines.append(f"  {CYAN}/map html{RESET}          - Export self-contained offline vector HTML map\n")
+
+    return "\n".join(lines)
+
+def generate_offline_html_map(radar_info, my_node_id, output_path):
+    my_loc = radar_info["my_location"]
+    targets = radar_info["targets"]
+
+    my_lat = my_loc["latitude"]
+    my_lon = my_loc["longitude"]
+
+    target_js_items = []
+    for t in targets:
+        t_id = t["id"]
+        t_type = t["type"]
+        t_lat = t["latitude"]
+        t_lon = t["longitude"]
+        t_dist = format_distance(t["distance_meters"])
+        t_bearing = f"{t['bearing']}° ({t['cardinal']})"
+        t_text = t.get("text", "")
+
+        color = "red" if t_type == "sos" else "cyan"
+        target_js_items.append(
+            f'{{ id: "{t_id}", type: "{t_type}", lat: {t_lat}, lon: {t_lon}, dist: "{t_dist}", bearing: "{t_bearing}", text: "{t_text}", color: "{color}" }}'
+        )
+
+    targets_js_array = "[\n      " + ",\n      ".join(target_js_items) + "\n    ]"
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EmergencyMesh Offline Radar Map</title>
+    <style>
+        body {{
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: monospace, system-ui, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }}
+        h1 {{ color: #00e5ff; margin-bottom: 5px; }}
+        .subtitle {{ color: #888; margin-bottom: 20px; }}
+        #radarCanvas {{
+            background-color: #050b14;
+            border: 2px solid #00e5ff;
+            border-radius: 50%;
+            box-shadow: 0 0 20px rgba(0, 229, 255, 0.3);
+        }}
+        .legend {{
+            margin-top: 20px;
+            max-width: 600px;
+            width: 100%;
+            background: #1e1e1e;
+            padding: 15px;
+            border-radius: 8px;
+        }}
+        .legend-item {{
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #333;
+        }}
+        .sos {{ color: #ff1744; font-weight: bold; }}
+        .peer {{ color: #00e5ff; font-weight: bold; }}
+    </style>
+</head>
+<body>
+    <h1>🚨 EMERGENCY MESH RADAR</h1>
+    <div class="subtitle">Self-Contained Offline Map • Center: {my_node_id} ({my_lat:.6f}, {my_lon:.6f})</div>
+
+    <canvas id="radarCanvas" width="500" height="500"></canvas>
+
+    <div class="legend">
+        <h3>Active Mesh Targets</h3>
+        <div id="targetList"></div>
+    </div>
+
+    <script>
+        const myLat = {my_lat};
+        const myLon = {my_lon};
+        const targets = {targets_js_array};
+
+        const canvas = document.getElementById('radarCanvas');
+        const ctx = canvas.getContext('2d');
+        const cx = 250;
+        const cy = 250;
+
+        function drawRadar() {{
+            ctx.clearRect(0, 0, 500, 500);
+
+            // Distance rings
+            ctx.strokeStyle = '#003344';
+            ctx.lineWidth = 1;
+            [50, 100, 175, 230].forEach(r => {{
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+                ctx.stroke();
+            }});
+
+            // Axes
+            ctx.strokeStyle = '#005577';
+            ctx.beginPath();
+            ctx.moveTo(cx, 10); ctx.lineTo(cx, 490);
+            ctx.moveTo(10, cy); ctx.lineTo(490, cy);
+            ctx.stroke();
+
+            // Cardinal labels
+            ctx.fillStyle = '#00e5ff';
+            ctx.font = '14px monospace';
+            ctx.fillText('N (0°)', cx - 20, 25);
+            ctx.fillText('S (180°)', cx - 25, 485);
+            ctx.fillText('E (90°)', 445, cy + 5);
+            ctx.fillText('W (270°)', 15, cy + 5);
+
+            // You (Center)
+            ctx.fillStyle = '#ffea00';
+            ctx.beginPath();
+            ctx.arc(cx, cy, 7, 0, 2 * Math.PI);
+            ctx.fill();
+
+            // Max distance scale
+            let maxDist = 100;
+            targets.forEach(t => {{
+                let d = parseFloat(t.dist);
+                if (!isNaN(d) && d > maxDist) maxDist = d;
+            }});
+
+            const targetListDiv = document.getElementById('targetList');
+            targetListDiv.innerHTML = '';
+
+            targets.forEach(t => {{
+                let distNum = parseFloat(t.dist);
+                let bearingNum = parseFloat(t.bearing);
+
+                let normD = Math.min(distNum / maxDist, 1.0) * 220;
+                let rad = (bearingNum - 90) * Math.PI / 180;
+
+                let tx = cx + normD * Math.cos(rad);
+                let ty = cy + normD * Math.sin(rad);
+
+                ctx.fillStyle = t.color === 'red' ? '#ff1744' : '#00e5ff';
+                ctx.beginPath();
+                ctx.arc(tx, ty, 6, 0, 2 * Math.PI);
+                ctx.fill();
+
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '11px monospace';
+                ctx.fillText(t.id, tx + 10, ty + 4);
+
+                let div = document.createElement('div');
+                div.className = 'legend-item ' + (t.type === 'sos' ? 'sos' : 'peer');
+                div.innerHTML = `<strong>${{t.id}}</strong> • ${{t.dist}} • Bearing: ${{t.bearing}} ${{t.text ? '- ' + t.text : ''}}`;
+                targetListDiv.appendChild(div);
+            }});
+        }}
+
+        drawRadar();
+    </script>
+</body>
+</html>
+"""
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
 
 class CLI:
     def __init__(self, node):
@@ -199,34 +477,99 @@ class CLI:
             print(f"{GREEN}✓ Broadcast message queued{RESET}")
             await self.node.send_broadcast(text)
         elif cmd == "/record":
-            if len(parts) < 2:
-                print(f"{YELLOW}Usage: /record <node_id|broadcast> [duration_seconds]{RESET}")
-                return
-            target = parts[1]
-            duration = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 5
-            recipient = "*" if target.lower() == "broadcast" else target
-            print(f"{CYAN}🎙️ Recording voice note ({duration}s)... Speak into microphone!{RESET}")
-            msg = await self.node.send_audio(recipient, duration_seconds=duration)
+            sub_parts = cmd_line.split(" ")
+            target_node = sub_parts[1] if len(sub_parts) >= 2 else "*"
+            duration = int(sub_parts[2]) if len(sub_parts) >= 3 and sub_parts[2].isdigit() else 5
+
+            print(f"\n{RED}{BOLD}🎙 RECORDING VOICE NOTE ({duration} seconds)... Speak now!{RESET}")
+            msg = await self.node.send_audio(target_node, duration_seconds=duration)
             if msg:
-                print(f"{GREEN}✓ Voice note recorded and queued for transmission ({duration}s){RESET}")
+                print(f"{GREEN}✓ Voice note recorded and queued ({len(msg['audio_data'])} bytes){RESET}\n")
             else:
-                print(f"{RED}Recording or audio encoding failed.{RESET}")
+                print(f"{RED}Audio recording failed. Ensure termux-api / ffmpeg or sox is available.{RESET}\n")
         elif cmd == "/play":
             if len(parts) < 2:
-                print(f"{YELLOW}Usage: /play <message_id>{RESET}")
+                print(f"{YELLOW}Usage: /play <message_id_prefix>{RESET}")
+                return
+            msg_id_prefix = parts[1]
+            success, msg_str = self.node.play_audio_message(msg_id_prefix)
+            if success:
+                print(f"{GREEN}✓ {msg_str}{RESET}")
+            else:
+                print(f"{RED}Playback failed: {msg_str}{RESET}")
+        elif cmd == "/map":
+            if len(parts) >= 2 and parts[1].lower() == "open":
+                target_id = parts[2] if len(parts) >= 3 else None
+                if target_id:
+                    nav_info, err = self.node.get_navigation_target(target_id)
+                    if err:
+                        print(f"{RED}{err}{RESET}")
+                        return
+                    t = nav_info["target"]
+                    geo_url = f"geo:{t['latitude']:.6f},{t['longitude']:.6f}?q={t['latitude']:.6f},{t['longitude']:.6f}({t['id']})"
+                else:
+                    my_loc = self.node.location_manager.get_location()
+                    if not my_loc:
+                        print(f"{YELLOW}Location UNKNOWN. Set coordinates manually via '/location set <lat> <lon>'{RESET}")
+                        return
+                    geo_url = f"geo:{my_loc['latitude']:.6f},{my_loc['longitude']:.6f}"
+
+                print(f"{CYAN}Opening target location in Android offline map app (OsmAnd / Organic Maps)...{RESET}")
+                if shutil.which("termux-open-url"):
+                    try:
+                        subprocess.Popen(["termux-open-url", geo_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        print(f"{GREEN}✓ Launched map intent: {geo_url}{RESET}")
+                    except Exception as e:
+                        print(f"{RED}Failed to open intent: {e}{RESET}")
+                else:
+                    print(f"{YELLOW}termux-open-url unavailable. Geo Intent URL: {geo_url}{RESET}")
+
+            elif len(parts) >= 2 and parts[1].lower() == "html":
+                radar_info, err = self.node.get_radar_nodes()
+                if err:
+                    print(f"{YELLOW}{err}{RESET}")
+                    return
+                html_path = self.node.config.config_dir / "map.html"
+                generate_offline_html_map(radar_info, self.node.node_id, html_path)
+                print(f"{GREEN}✓ Self-contained offline HTML map generated at: {html_path}{RESET}")
+                if shutil.which("termux-open-url"):
+                    try:
+                        subprocess.Popen(["termux-open-url", str(html_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        print(f"{GREEN}✓ Opened map in browser.{RESET}")
+                    except Exception:
+                        pass
+            else:
+                radar_info, err = self.node.get_radar_nodes()
+                if err:
+                    print(f"{YELLOW}{err}{RESET}")
+                else:
+                    print(render_ascii_radar(radar_info, self.node.node_id))
+
+        elif cmd == "/navigate":
+            if len(parts) < 2:
+                print(f"{YELLOW}Usage: /navigate <node_id|sos_id|lat,lon>{RESET}")
                 return
             target_id = parts[1]
-            full_msg_id = target_id
-            for m in self.node.get_history(limit=50):
-                if m["id"].startswith(target_id):
-                    full_msg_id = m["id"]
-                    break
-
-            success, info = self.node.play_audio_message(full_msg_id)
-            if success:
-                print(f"{GREEN}▶ {info}{RESET}")
+            nav_info, err = self.node.get_navigation_target(target_id)
+            if err:
+                print(f"{RED}{err}{RESET}")
             else:
-                print(f"{RED}Playback failed: {info}{RESET}")
+                my_loc = nav_info["my_location"]
+                t = nav_info["target"]
+
+                dist_str = format_distance(t["distance_meters"])
+                bearing = t["bearing"]
+                cardinal = t["cardinal"]
+
+                print(f"\n{CYAN}{BOLD}🧭 OFFLINE COMPASS NAVIGATION GUIDANCE{RESET}")
+                print(f"  {BOLD}Destination:{RESET}             {CYAN}{t['id']}{RESET}")
+                print(f"  {BOLD}Target Coordinates:{RESET}      {t['latitude']:.6f}, {t['longitude']:.6f}")
+                print(f"  {BOLD}Your Coordinates:{RESET}        {my_loc['latitude']:.6f}, {my_loc['longitude']:.6f}\n")
+                print(f"  {BOLD}Approx. Distance:{RESET}        {GREEN}{dist_str}{RESET}")
+                print(f"  {BOLD}Compass Bearing:{RESET}         {YELLOW}{bearing}° ({cardinal}){RESET}\n")
+                print(f"{BOLD}NAVIGATION INSTRUCTION:{RESET}")
+                print(f"  {GREEN}Face {cardinal} ({bearing}°) and walk forward for approximately {dist_str}.{RESET}\n")
+
         elif cmd == "/location":
             if len(parts) >= 4 and parts[1].lower() == "set":
                 lat, lon = parts[2], parts[3]

@@ -124,6 +124,12 @@ EmergencyMesh operates as a standalone, self-contained terminal application runn
 - **FR-5.2**: Messages sent to unreachable nodes shall be stored in SQLite with status `QUEUED`.
 - **FR-5.3**: A background worker shall retry transmitting queued messages every 10 seconds or immediately upon peer discovery.
 
+### 3.6 Offline Terminal Radar Map & Compass Navigation
+- **FR-6.1**: Executing `/map` shall render an offline 2D ANSI radar screen displaying `★ YOU` at the center with cardinal direction axes and plotted peer/SOS positions.
+- **FR-6.2**: Executing `/navigate <target_id>` shall compute Haversine distance and initial compass bearing angle (0.0° to 360.0°) with 8-point cardinal guidance (N, NE, E, SE, S, SW, W, NW).
+- **FR-6.3**: Executing `/map open [target_id]` shall trigger Android `geo:<lat>,<lon>` intent via `termux-open-url` to launch offline mapping apps (OsmAnd / Organic Maps).
+- **FR-6.4**: Executing `/map html` shall generate a self-contained offline HTML vector map file (`~/.emergency_mesh/map.html`).
+
 ---
 
 ## 4. External Interface Requirements
@@ -134,7 +140,7 @@ The CLI shall display a dynamic prompt showing node identity and active peer cou
 [RESCUE-DF9G | Peers: 2] > 
 ```
 Supported commands:
-- `/help`, `/nodes`, `/msg <node> <text>`, `/broadcast <text>`, `/sos [text]`, `/location [set|clear]`, `/history`, `/status`, `/connect <ip> [port]`, `/id`, `/quit`.
+- `/help`, `/nodes`, `/msg <node> <text>`, `/broadcast <text>`, `/sos [text]`, `/location [set|refresh|clear]`, `/map [open|html]`, `/navigate <node_id>`, `/record`, `/play`, `/history`, `/status`, `/connect <ip> [port]`, `/id`, `/quit`.
 
 ### 4.2 Database Schema
 

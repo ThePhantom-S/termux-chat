@@ -9,7 +9,7 @@ from emergency_mesh.protocol import (
     deserialize_message,
     validate_message
 )
-from emergency_mesh.gps import haversine_distance
+from emergency_mesh.gps import haversine_distance, calculate_bearing
 
 class TestProtocol(unittest.TestCase):
     def test_create_and_validate_chat_message(self):
@@ -42,6 +42,17 @@ class TestProtocol(unittest.TestCase):
         dist = haversine_distance(lat1, lon1, lat2, lon2)
         self.assertIsNotNone(dist)
         self.assertTrue(30 < dist < 80, f"Expected distance ~50m, got {dist}")
+
+    def test_bearing_calculation(self):
+        # Due North
+        bearing, cardinal = calculate_bearing(13.0, 80.0, 14.0, 80.0)
+        self.assertEqual(cardinal, "N")
+        self.assertAlmostEqual(bearing, 0.0, delta=1.0)
+
+        # Due East
+        bearing, cardinal = calculate_bearing(13.0, 80.0, 13.0, 81.0)
+        self.assertEqual(cardinal, "E")
+        self.assertAlmostEqual(bearing, 90.0, delta=2.0)
 
     def test_serialization_roundtrip(self):
         msg = create_broadcast_message("NODE-X", "Warning")

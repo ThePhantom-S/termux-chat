@@ -47,6 +47,32 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
     return R * c
 
+def calculate_bearing(lat1, lon1, lat2, lon2):
+    """
+    Calculates initial compass bearing in degrees (0.0 to 360.0) and cardinal direction from (lat1, lon1) to (lat2, lon2).
+    Returns (bearing_degrees, cardinal_str), or (None, "UNKNOWN") if invalid.
+    """
+    try:
+        lat1, lon1, lat2, lon2 = map(float, [lat1, lon1, lat2, lon2])
+    except (ValueError, TypeError):
+        return None, "UNKNOWN"
+
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    y = math.sin(delta_lambda) * math.cos(phi2)
+    x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(delta_lambda)
+
+    theta = math.atan2(y, x)
+    bearing = (math.degrees(theta) + 360.0) % 360.0
+
+    directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+    idx = int((bearing + 22.5) / 45.0) % 8
+    cardinal = directions[idx]
+
+    return round(bearing, 1), cardinal
+
 def trigger_vibration(duration_ms=1500):
     """
     Triggers physical device vibration using `termux-vibrate` via subprocess.
