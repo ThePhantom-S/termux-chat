@@ -231,7 +231,7 @@ class LocationManager:
                     cmd,
                     capture_output=True,
                     text=True,
-                    timeout=1.5
+                    timeout=6.0
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     data = json.loads(result.stdout.strip())

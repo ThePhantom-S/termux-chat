@@ -16,9 +16,9 @@ BANNER_TEMPLATE = f"""{CYAN}{BOLD}
 ║          EMERGENCY MESH                  ║
 ║      OFFLINE COMMUNICATION               ║
 ╠══════════════════════════════════════════╣
-║ Node: {{node_id:<27}} ║
+║ Node: {{node_id:<27}}                    ║
 ║ Network: OFFLINE MESH                    ║
-║ Nearby nodes: {{peer_count:<25}} ║
+║ Nearby nodes: {{peer_count:<25}}         ║
 ╚══════════════════════════════════════════╝{RESET}
 Type {BOLD}/help{RESET} for commands list.
 """
@@ -82,9 +82,15 @@ class CLI:
         ts = format_time(msg.get("timestamp", time.time()))
 
         if msg_type == "sos":
-            lat = msg.get("latitude", "UNKNOWN")
-            lon = msg.get("longitude", "UNKNOWN")
-            loc_str = f"{lat}, {lon}" if lat != "UNKNOWN" else "UNKNOWN"
+            lat = msg.get("latitude")
+            lon = msg.get("longitude")
+            if lat not in (None, "UNKNOWN") and lon not in (None, "UNKNOWN"):
+                try:
+                    loc_str = f"{float(lat):.6f}, {float(lon):.6f}"
+                except (ValueError, TypeError):
+                    loc_str = "UNKNOWN"
+            else:
+                loc_str = "UNKNOWN"
             dist_meters = msg.get("_distance_meters")
             is_proximity = msg.get("_is_proximity_alert", False)
 
@@ -282,8 +288,21 @@ class CLI:
             msg = await self.node.send_sos(text)
             lat = msg.get("latitude")
             lon = msg.get("longitude")
-            loc_str = f"{lat}, {lon}" if lat != "UNKNOWN" else "UNKNOWN"
-            print(f"Location: {RED}{loc_str}{RESET}\n")
+            if lat not in (None, "UNKNOWN") and lon not in (None, "UNKNOWN"):
+                try:
+                    loc_str = f"{float(lat):.6f}, {float(lon):.6f}"
+                except (ValueError, TypeError):
+                    loc_str = "UNKNOWN"
+            else:
+                loc_str = "UNKNOWN"
+
+            print(f"Location: {RED}{loc_str}{RESET}")
+            if loc_str == "UNKNOWN":
+                print(f"{YELLOW}⚠ GPS coordinates unavailable from OS.{RESET}")
+                print(f"{YELLOW}  - Set exact location manually anytime: /location set <lat> <lon>{RESET}")
+                print(f"{YELLOW}  - Example: /location set 13.0827 80.2707{RESET}\n")
+            else:
+                print()
         elif cmd == "/history":
             history = self.node.get_history(limit=20)
             if not history:
