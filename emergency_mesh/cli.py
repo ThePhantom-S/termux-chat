@@ -20,9 +20,9 @@ BANNER_TEMPLATE = f"""{CYAN}{BOLD}
 ║          EMERGENCY MESH                  ║
 ║      OFFLINE COMMUNICATION               ║
 ╠══════════════════════════════════════════╣
-║ Node: {{node_id:<27}} ║
+║ Node: {{node_id:<27}}        ║
 ║ Network: OFFLINE MESH                    ║
-║ Nearby nodes: {{peer_count:<25}} ║
+║ Nearby nodes: {{peer_count:<25}}  ║
 ╚══════════════════════════════════════════╝{RESET}
 Type {BOLD}/help{RESET} for commands list.
 """
